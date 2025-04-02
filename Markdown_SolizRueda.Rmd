@@ -1,0 +1,176 @@
+---
+title: "PEC1"
+author: "Jorge Soliz"
+date: "2025-04-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# cargar paquetes y objeto
+library(SummarizedExperiment)
+library(tidyverse)
+
+load("C:/Users/soliz-j/Downloads/Master/SummarizedExperiment_Object.Rda")
+se
+```
+
+## Introducción
+
+Este es el documento markdown para la presentación de la PEC1 de la asignatura de Análisis de datos ómicos del máster de bioinformática y bioestadística. 
+
+Obtención de metadata del dataset. Podemos observar que los datos estan formados por 77 muestras (pacientes), en la que se dividen en dos grupos experimentales. Control y Cachexia:
+
+```{r cargar-se}
+# visualizar metadata de las muestras
+colData(se)
+
+# visualizar metabolitos 
+rowData(se)
+
+# visualizar descripciones generales del experimento
+metadata(se)
+```
+
+## preparadion de datos
+
+Preparar datos para un analisis exploratorio con gráficas:
+
+```{r preparacion-datos}
+matriz <- assay(se)
+grupos <- colData(se)$Group
+names(grupos) <- rownames(colData(se))
+
+df_long <- as.data.frame(t(matriz))
+df_long$Sample <- rownames(df_long)
+df_long$Group <- grupos[rownames(df_long)]
+
+df_long <- df_long |>
+  pivot_longer(cols = -c(Sample, Group),
+               names_to = "Metabolite",
+               values_to = "Value")
+```
+
+## Análisis exploratorio del dataset
+
+se realiza un analisis descriptivo de cada grupo experimental: 
+
+```{r analisis-descriptivo}
+library(psych)
+library(dplyr)
+
+# crear tabla resumen de los datos por grupo y metabolito
+resultados <- lapply(unique(df_long$Metabolite), function(met) {
+  datos_met <- subset(df_long, Metabolite == met)
+  res <- describeBy(datos_met$Value, group = datos_met$Group, mat = TRUE)
+  res$Metabolite <- met
+  res$Group <- res$group1
+  res$ID <- paste0(res$Metabolite, "-", res$Group)
+  res
+})
+resultados_df <- bind_rows(resultados)
+head(resultados_df)
+```
+
+## Histogramas de cada metabolito
+
+```{r histogramas-individuales}
+library(ggplot2)
+library(knitr)
+library(ggplot2)
+library(gridExtra)
+
+# lista de metabolitos
+metabs <- unique(df_long$Metabolite)
+
+# generar histograma para cada metabolito - codigo adaptado para mostrar varias graficas en la misma linea en el html
+plots <- lapply(metabs, function(m) {
+  ggplot(
+    dplyr::filter(df_long, Metabolite == m),
+    aes(x = Value, fill = Group)
+  ) +
+    geom_histogram(bins = 30, alpha = 0.6, position = "identity") +
+    theme_minimal() +
+    labs(title = paste("Histograma de", m)) +
+    theme(
+      legend.position = "bottom", 
+      plot.title = element_text(size = 7, face = "bold")
+    )
+})
+
+# mostrar varios graficos en la misma linea
+n <- 8  
+
+for (i in seq(1, length(plots), by = n)) {
+  do.call(grid.arrange, c(plots[i:min(i + n - 1, length(plots))], ncol = 4))
+}
+
+```
+
+## Boxplots por grupos
+
+``` {r boxplots-individuales}
+# generar bloxplot por cada metabolito - codigo adaptado para mostrar varias graficas en la misma linea en el html
+boxplots <- lapply(metabs, function(m) {
+  ggplot(
+    dplyr::filter(df_long, Metabolite == m),
+    aes(x = Group, y = Value, fill = Group)
+  ) +
+    geom_boxplot() +
+    theme_minimal() +
+    labs(title = paste("Boxplot de", m)) +
+    theme(
+      legend.position = "none",
+      plot.title = element_text(size = 7, face = "bold")
+    )
+})
+
+# mostrar varios graficos en la misma linea
+n <- 8
+
+for (i in seq(1, length(boxplots), by = n)) {
+  do.call(grid.arrange, c(boxplots[i:min(i + n - 1, length(boxplots))], ncol = 4))
+}
+
+```
+
+## PCA
+
+```{r PCA}
+# escalar y transponer matriz para generar el PCA
+scaled_expr <- scale(t(matriz))
+pca <- prcomp(scaled_expr)
+
+# agrupar datos
+pca_df <- as.data.frame(pca$x)
+pca_df$Group <- colData(se)$Group
+
+# generar PCA
+ggplot(pca_df, aes(x = PC1, y = PC2, color = Group)) +
+  geom_point(size = 3) +
+  theme_minimal() +
+  labs(title = "PCA de metabolomica de control vs cachexia")
+```
+
+## Heatmap
+
+```{r heatmap}
+library(pheatmap)
+
+# calcular coeficiente de variación
+cv <- apply(assay(se), 1, function(x) sd(x) / mean(x))
+top_metabs <- names(sort(cv, decreasing = TRUE))[1:25]
+
+# generar heatmap
+pheatmap(assay(se)[top_metabs, ],
+         annotation_col = as.data.frame(colData(se)),
+         scale = "row",
+         clustering_distance_rows = "euclidean",
+         clustering_distance_cols = "euclidean",
+         main = "Top 25 metabolitos más variables",
+         fontsize_row = 6,   # Tamaño de letra de las filas
+         fontsize_col = 2     # Tamaño de letra de las columnas
+)
+
+
+```
+
